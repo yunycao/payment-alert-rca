@@ -1,0 +1,40 @@
+{
+  "hooks": [
+    {
+      "matcher": {
+        "tool_name": "Bash",
+        "command_pattern": ".*pull.*(funnel|data|snowflake).*"
+      },
+      "hooks": [
+        {
+          "type": "preToolUse",
+          "command": "python src/hooks/pull_funnel_data.py --validate-connection"
+        }
+      ]
+    },
+    {
+      "matcher": {
+        "tool_name": "Bash",
+        "command_pattern": ".*run.*(analysis|notebook|anomaly).*"
+      },
+      "hooks": [
+        {
+          "type": "preToolUse",
+          "command": "python src/hooks/validate_freshness.py"
+        }
+      ]
+    },
+    {
+      "matcher": {
+        "tool_name": "Bash",
+        "command_pattern": ".*competitor.*"
+      },
+      "hooks": [
+        {
+          "type": "preToolUse",
+          "command": "python src/hooks/pull_competitor_data.py --check-cache"
+        }
+      ]
+    }
+  ]
+}

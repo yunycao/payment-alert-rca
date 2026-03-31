@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "pull-funnel-data": {
+      "description": "Pull full funnel data for payment alert intent from Snowflake",
+      "trigger": "PreToolUse",
+      "pattern": "Bash",
+      "command": "python src/hooks/pull_funnel_data.py",
+      "env": {
+        "CONFIG_PATH": "config/analysis_config.yaml",
+        "ENV_PATH": "config/snowflake.env"
+      }
+    },
+    "pull-competitor-data": {
+      "description": "Pull competitor messaging overlap data for eligible audience",
+      "trigger": "PreToolUse",
+      "pattern": "Bash",
+      "command": "python src/hooks/pull_competitor_data.py",
+      "env": {
+        "CONFIG_PATH": "config/analysis_config.yaml",
+        "ENV_PATH": "config/snowflake.env"
+      }
+    },
+    "pull-anomaly-data": {
+      "description": "Pull all anomaly event data (drift, timeouts, campaign takeover)",
+      "trigger": "PreToolUse",
+      "pattern": "Bash",
+      "command": "python src/hooks/pull_anomaly_data.py",
+      "env": {
+        "CONFIG_PATH": "config/analysis_config.yaml",
+        "ENV_PATH": "config/snowflake.env"
+      }
+    },
+    "validate-data-freshness": {
+      "description": "Check data freshness before any analysis notebook run",
+      "trigger": "PreToolUse",
+      "pattern": "Bash",
+      "command": "python src/hooks/validate_freshness.py",
+      "env": {
+        "CONFIG_PATH": "config/analysis_config.yaml"
+      }
+    }
+  },
+  "settings": {
+    "auto_pull_on_stale": true,
+    "stale_threshold_hours": 4,
+    "data_output_format": "parquet",
+    "data_staging_dir": "data/staging/"
+  }
+}

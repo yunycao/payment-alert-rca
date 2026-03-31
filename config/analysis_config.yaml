@@ -1,0 +1,138 @@
+# Payment Alert RCA - Analysis Configuration
+
+intent:
+  name: payment_alert
+  display_name: "Payment Alert"
+  channels:
+    - email
+    - push
+    - in_app
+
+funnel:
+  stages:
+    - name: eligible
+      description: "Users eligible for payment alert messaging"
+    - name: targeted
+      description: "Users selected by targeting/propensity model"
+    - name: suppressed
+      description: "Users suppressed (fatigue, competitor, holdout)"
+    - name: sent
+      description: "Messages dispatched to channel provider"
+    - name: delivered
+      description: "Messages confirmed delivered"
+    - name: opened
+      description: "Messages opened / impressions served"
+    - name: clicked
+      description: "Users clicked CTA in message"
+    - name: converted
+      description: "Users completed payment action"
+
+  breakdowns:
+    - channel          # email / push / in_app
+    - segment          # new / active / dormant / at_risk
+    - model_version    # propensity model version
+    - campaign_id      # specific campaign
+    - day              # daily trend
+
+competitor_analysis:
+  window_hours: 24     # Look-back window for competing messages
+  max_competitors: 10  # Top N competing intents to analyze
+  suppression_reasons:
+    - frequency_cap
+    - priority_suppression
+    - channel_fatigue
+    - holdout_group
+    - competitor_won
+
+anomaly:
+  propensity_drift:
+    reference_window_days: 30
+    detection_window_days: 7
+    drift_threshold_psi: 0.1       # Population Stability Index threshold
+    percentile_bins: 10
+    alert_on_ks_pvalue: 0.01       # KS test significance level
+
+  default_scores:
+    timeout_threshold_ms: 5000
+    default_score_value: 0.5
+    acceptable_timeout_rate: 0.02  # 2% max acceptable
+    lookback_days: 14
+
+  campaign_takeover:
+    impression_share_threshold: 0.40  # Flag if single campaign > 40% of impressions
+    min_campaigns_expected: 5
+    concentration_hhi_threshold: 0.25 # Herfindahl-Hirschman Index
+    lookback_days: 7
+
+ecosystem:
+  # Incrementality measurement via holdout-based causal inference
+  incrementality:
+    holdout_rate: 0.05                   # 5% global holdout
+    min_holdout_size: 10000              # Minimum users for statistical power
+    confidence_level: 0.95
+    min_detectable_effect: 0.005         # 0.5pp lift minimum
+    metrics:
+      - conversion_rate
+      - revenue_per_eligible
+      - payment_completion_rate
+      - days_to_next_payment
+      - ltv_30d
+      - ltv_90d
+
+  # Cannibalization: does this intent steal conversions from another?
+  cannibalization:
+    attribution_window_hours: 72
+    organic_baseline_window_days: 30     # Pre-messaging baseline for organic rate
+    cross_intent_pairs:                  # Intent pairs to check for cannibalization
+      - [payment_alert, bill_reminder]
+      - [payment_alert, account_balance]
+      - [payment_alert, savings_goal]
+    min_overlap_pct: 0.10               # Only check pairs with >10% audience overlap
+
+  # Long-term value and engagement health
+  ltv_effects:
+    measurement_windows_days: [7, 30, 90]
+    engagement_decay_lookback_days: 180
+    fatigue_indicators:
+      - unsubscribe_rate
+      - opt_out_rate
+      - open_rate_decay_slope           # Negative slope = fatigue
+      - message_to_action_latency_trend
+    cohort_granularity: weekly
+
+tradeoffs:
+  # Intent priority optimization (portfolio-level)
+  priority:
+    intents_in_portfolio:
+      - payment_alert
+      - bill_reminder
+      - account_balance
+      - fraud_detection
+      - savings_goal
+      - credit_offer
+    objective: "maximize_portfolio_conversion"  # vs maximize_single_intent
+    constraints:
+      max_messages_per_user_per_day: 3
+      min_intent_delivery_pct: 0.15      # No intent gets < 15% of its eligible
+      max_intent_delivery_pct: 0.60      # No intent gets > 60% of total inventory
+
+  # Channel allocation efficiency frontier
+  channel_allocation:
+    cost_per_message:
+      email: 0.002
+      push: 0.0005
+      in_app: 0.0001
+    marginal_return_estimation: true     # Fit diminishing returns curves
+    saturation_model: "log_concave"      # log, sigmoid, log_concave
+
+  # Frequency optimization
+  frequency:
+    test_frequencies: [1, 2, 3, 5, 7]   # Messages per user per week
+    response_curve_model: "negative_binomial"
+    fatigue_penalty_weight: 0.3          # Weight on long-term engagement in objective
+    lookback_cohorts_weeks: 12
+
+output:
+  data_dir: "data/"
+  plots_dir: "output/plots/"
+  reports_dir: "output/reports/"
