@@ -34,6 +34,43 @@ funnel:
     - campaign_id      # specific campaign
     - day              # daily trend
 
+# ---- Root Cause Analysis: Business Outcome Metrics ----
+rca:
+  # Primary business metrics to diagnose
+  target_metrics:
+    - name: spend
+      description: "Total payment spend per user (post-messaging)"
+      source_table: user_transactions
+      aggregation: sum
+      alert_on: "week_over_week_drop_pct > 5"
+    - name: on_time_payment_rate
+      description: "% of users making payment by due date"
+      source_table: payment_outcomes
+      aggregation: avg
+      alert_on: "week_over_week_drop_pct > 3"
+
+  # Decomposition dimensions for waterfall analysis
+  decomposition_dimensions:
+    - segment                   # new / active / dormant / at_risk
+    - channel                   # email / push / in_app
+    - campaign_id
+    - propensity_decile         # model score bucket
+    - payment_due_bucket        # days until due: 0-3, 4-7, 8-14, 15+
+    - score_source              # model vs default
+
+  # Time comparison windows
+  comparison:
+    current_window_days: 7
+    baseline_window_days: 7       # prior period
+    trend_lookback_weeks: 12      # for seasonal adjustment
+    min_sample_size: 500          # minimum users per dimension for valid comparison
+
+  # Thresholds for flagging root cause contributors
+  contribution_thresholds:
+    min_mix_shift_pct: 2.0        # flag if population mix shifts > 2pp
+    min_rate_change_pct: 1.0      # flag if within-group rate changes > 1pp
+    min_volume_pct: 5.0           # ignore dimensions with < 5% of volume
+
 competitor_analysis:
   window_hours: 24     # Look-back window for competing messages
   max_competitors: 10  # Top N competing intents to analyze
@@ -131,6 +168,24 @@ tradeoffs:
     response_curve_model: "negative_binomial"
     fatigue_penalty_weight: 0.3          # Weight on long-term engagement in objective
     lookback_cohorts_weeks: 12
+
+validation:
+  # Agent scoring thresholds
+  min_completeness_score: 70          # Minimum to accept an investigation
+  min_conciseness_score: 60           # Below this, flag redundant work
+  combined_weight_completeness: 0.6   # 60% weight on completeness
+  combined_weight_conciseness: 0.4    # 40% weight on conciseness
+
+  # Operational metric targets (SLOs)
+  mttd_target_hours: 4.0              # Detect drops within 4 hours
+  fdr_target_pct: 15.0                # False discovery rate < 15%
+  resolution_rate_target_pct: 80.0    # 80% of investigations resolved
+  mttr_target_hours: 24.0             # Mean time to resolution < 24 hours
+
+  # Redundancy elimination
+  data_validation_max_count: 1        # Validate data freshness once (in hooks)
+  anomaly_check_mode: "consolidated"  # single-pass instead of sequential
+  max_decomposition_dimensions: 5     # Cap decomposition breadth
 
 output:
   data_dir: "data/"

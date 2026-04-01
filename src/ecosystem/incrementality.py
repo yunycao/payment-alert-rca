@@ -316,4 +316,30 @@ class IncrementalityAnalyzer:
                                "absolute_lift", "ci_lower", "ci_upper",
                                "significant"]].to_markdown(index=False))
 
+        # Business outcomes: Spend and On-Time Rate
+        if "avg_spend" in self.df.columns:
+            lines.append("\n## 7. Spend Lift (Causal)\n")
+            spend_lift = self.estimate_lift("avg_spend")
+            lines.append(spend_lift[["metric", "treatment_mean", "holdout_mean",
+                                     "absolute_lift", "relative_lift_pct", "p_value",
+                                     "significant"]].to_markdown(index=False))
+
+            spend_did = self.did_estimate("avg_spend")
+            lines.append(f"\n- Naive spend lift: ${spend_did['naive_lift']:.2f}")
+            lines.append(f"- DiD-adjusted spend lift: ${spend_did['did_lift']:.2f}")
+
+        if "on_time_payment_rate" in self.df.columns:
+            lines.append("\n## 8. On-Time Payment Rate Lift (Causal)\n")
+            otp_lift = self.estimate_lift("on_time_payment_rate")
+            lines.append(otp_lift[["metric", "treatment_mean", "holdout_mean",
+                                   "absolute_lift", "relative_lift_pct", "p_value",
+                                   "significant"]].to_markdown(index=False))
+
+            otp_channel = self.estimate_lift("on_time_payment_rate", group_by=["channel"])
+            if len(otp_channel) > 0:
+                lines.append("\n### On-Time Rate Lift by Channel\n")
+                lines.append(otp_channel[["channel", "treatment_mean", "holdout_mean",
+                                          "absolute_lift", "p_value",
+                                          "significant"]].to_markdown(index=False))
+
         return "\n".join(lines)

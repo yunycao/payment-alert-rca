@@ -55,7 +55,26 @@ forward_engagement AS (
         -- Repeat behavior: did they return for a second payment?
         COUNT(DISTINCT CASE WHEN ue.event_type = 'payment_completed'
             AND DATEDIFF(day, mc.cohort_date, ue.event_date) BETWEEN 0 AND 90
-            THEN ue.event_date END) AS payment_events_90d
+            THEN ue.event_date END) AS payment_events_90d,
+
+        -- Spend trajectory by window
+        SUM(CASE WHEN DATEDIFF(day, mc.cohort_date, ue.event_date) BETWEEN 0 AND 7
+            AND ue.event_type = 'payment_completed' THEN ue.payment_amount ELSE 0 END) AS spend_7d,
+        SUM(CASE WHEN DATEDIFF(day, mc.cohort_date, ue.event_date) BETWEEN 0 AND 30
+            AND ue.event_type = 'payment_completed' THEN ue.payment_amount ELSE 0 END) AS spend_30d,
+        SUM(CASE WHEN DATEDIFF(day, mc.cohort_date, ue.event_date) BETWEEN 0 AND 90
+            AND ue.event_type = 'payment_completed' THEN ue.payment_amount ELSE 0 END) AS spend_90d,
+
+        -- On-time payment rate trajectory
+        AVG(CASE WHEN DATEDIFF(day, mc.cohort_date, ue.event_date) BETWEEN 0 AND 7
+            AND ue.payment_due_date IS NOT NULL
+            THEN CASE WHEN ue.payment_completed_date <= ue.payment_due_date THEN 1.0 ELSE 0.0 END END) AS on_time_rate_7d,
+        AVG(CASE WHEN DATEDIFF(day, mc.cohort_date, ue.event_date) BETWEEN 0 AND 30
+            AND ue.payment_due_date IS NOT NULL
+            THEN CASE WHEN ue.payment_completed_date <= ue.payment_due_date THEN 1.0 ELSE 0.0 END END) AS on_time_rate_30d,
+        AVG(CASE WHEN DATEDIFF(day, mc.cohort_date, ue.event_date) BETWEEN 0 AND 90
+            AND ue.payment_due_date IS NOT NULL
+            THEN CASE WHEN ue.payment_completed_date <= ue.payment_due_date THEN 1.0 ELSE 0.0 END END) AS on_time_rate_90d
 
     FROM messaging_cohorts mc
     LEFT JOIN {{ database }}.{{ schema }}.user_events ue
@@ -91,6 +110,16 @@ SELECT
     AVG(unsubscribed) AS unsubscribe_rate,
     AVG(opted_out) AS opt_out_rate,
     AVG(app_deleted) AS app_delete_rate,
+
+    -- Spend trajectory
+    AVG(spend_7d) AS avg_spend_7d,
+    AVG(spend_30d) AS avg_spend_30d,
+    AVG(spend_90d) AS avg_spend_90d,
+
+    -- On-time rate trajectory
+    AVG(on_time_rate_7d) AS avg_on_time_rate_7d,
+    AVG(on_time_rate_30d) AS avg_on_time_rate_30d,
+    AVG(on_time_rate_90d) AS avg_on_time_rate_90d,
 
     -- Composite health: (LTV lift) - (fatigue penalty)
     AVG(revenue_90d) - (AVG(unsubscribed) + AVG(opted_out)) * AVG(revenue_90d) * {{ fatigue_penalty_weight }}

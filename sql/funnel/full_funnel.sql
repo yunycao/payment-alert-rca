@@ -75,6 +75,22 @@ conversions AS (
     FROM {{ database }}.{{ schema }}.conversions c
     WHERE c.intent_name = '{{ intent_name }}'
       AND c.conversion_date BETWEEN '{{ start_date }}' AND '{{ end_date }}'
+),
+
+-- Business outcome: spend and on-time payment behavior
+payment_outcomes AS (
+    SELECT
+        po.user_id,
+        po.payment_due_date,
+        po.payment_amount,
+        po.payment_completed_date,
+        po.payment_status,         -- 'on_time', 'late', 'missed', 'pending'
+        CASE WHEN po.payment_completed_date <= po.payment_due_date
+             THEN 1 ELSE 0 END AS is_on_time,
+        DATEDIFF(day, po.payment_due_date, po.payment_completed_date) AS days_relative_to_due,
+        po.payment_category         -- 'credit_card', 'loan', 'utility', 'subscription'
+    FROM {{ database }}.{{ schema }}.payment_outcomes po
+    WHERE po.payment_due_date BETWEEN '{{ start_date }}' AND DATEADD(day, 30, '{{ end_date }}')
 )
 
 -- FULL FUNNEL AGGREGATION BY DAY x CHANNEL x SEGMENT
@@ -119,7 +135,19 @@ SELECT
     AVG(ea.propensity_score) AS avg_propensity_score,
     MEDIAN(ea.propensity_score) AS median_propensity_score,
     COUNT(DISTINCT CASE WHEN td.score_source = 'default' THEN ea.user_id END) AS default_score_users,
-    AVG(td.model_latency_ms) AS avg_model_latency_ms
+    AVG(td.model_latency_ms) AS avg_model_latency_ms,
+
+    -- Business outcomes: Spend
+    SUM(COALESCE(po.payment_amount, 0)) AS total_spend,
+    AVG(COALESCE(po.payment_amount, 0)) AS avg_spend_per_user,
+    COUNT(DISTINCT CASE WHEN po.payment_status IS NOT NULL THEN ea.user_id END) AS users_with_payment_due,
+
+    -- Business outcomes: On-time payment rate
+    AVG(COALESCE(po.is_on_time, 0)) AS on_time_payment_rate,
+    COUNT(DISTINCT CASE WHEN po.is_on_time = 1 THEN ea.user_id END) AS on_time_users,
+    COUNT(DISTINCT CASE WHEN po.payment_status = 'late' THEN ea.user_id END) AS late_users,
+    COUNT(DISTINCT CASE WHEN po.payment_status = 'missed' THEN ea.user_id END) AS missed_users,
+    AVG(po.days_relative_to_due) AS avg_days_relative_to_due
 
 FROM eligible_audience ea
 LEFT JOIN targeting_decisions td
@@ -143,6 +171,10 @@ LEFT JOIN engagement_events ee_click
 LEFT JOIN conversions cv
     ON ea.user_id = cv.user_id
     AND ea.campaign_id = cv.attribution_campaign_id
+LEFT JOIN payment_outcomes po
+    ON ea.user_id = po.user_id
+    AND po.payment_due_date BETWEEN ea.eligibility_date
+        AND DATEADD(day, 30, ea.eligibility_date)
 
 GROUP BY 1, 2, 3, 4, 5
 ORDER BY 1, 2, 3;

@@ -154,6 +154,89 @@ class LTVEffectsAnalyzer:
         else:
             return pd.DataFrame()
 
+    def spend_trajectory(self) -> pd.DataFrame:
+        """Compare spend between treatment and holdout at each time window."""
+        results = []
+        for window in ["7d", "30d", "90d"]:
+            col = f"avg_spend_{window}"
+            if col not in self.df.columns:
+                continue
+            t = self.df[self.df["holdout_group"] == "treatment"]
+            h = self.df[self.df["holdout_group"] == "holdout"]
+
+            t_mean = t[col].mean()
+            h_mean = h[col].mean()
+            lift = t_mean - h_mean
+            rel_lift = lift / h_mean if h_mean > 0 else np.nan
+
+            results.append({
+                "window": window,
+                "treatment_spend": round(t_mean, 2),
+                "holdout_spend": round(h_mean, 2),
+                "spend_lift": round(lift, 2),
+                "relative_lift_pct": round(rel_lift * 100, 1) if not np.isnan(rel_lift) else np.nan,
+            })
+        return pd.DataFrame(results)
+
+    def on_time_rate_trajectory(self) -> pd.DataFrame:
+        """Compare on-time payment rate between treatment and holdout."""
+        results = []
+        for window in ["7d", "30d", "90d"]:
+            col = f"avg_on_time_rate_{window}"
+            if col not in self.df.columns:
+                continue
+            t = self.df[self.df["holdout_group"] == "treatment"]
+            h = self.df[self.df["holdout_group"] == "holdout"]
+
+            t_mean = t[col].mean()
+            h_mean = h[col].mean()
+            lift = t_mean - h_mean
+
+            results.append({
+                "window": window,
+                "treatment_on_time_rate": round(t_mean, 4),
+                "holdout_on_time_rate": round(h_mean, 4),
+                "lift_pp": round(lift * 100, 2),
+            })
+        return pd.DataFrame(results)
+
+    def outcome_decay_assessment(self, metric: str = "spend") -> dict:
+        """Classify whether spend or on-time rate lift decays over time."""
+        if metric == "spend":
+            traj = self.spend_trajectory()
+            lift_col = "relative_lift_pct"
+        else:
+            traj = self.on_time_rate_trajectory()
+            lift_col = "lift_pp"
+
+        if traj.empty:
+            return {"pattern": "no_data", "metric": metric}
+
+        lifts = dict(zip(traj["window"], traj[lift_col]))
+        l7 = lifts.get("7d", 0) or 0
+        l30 = lifts.get("30d", 0) or 0
+        l90 = lifts.get("90d", 0) or 0
+
+        if l90 < 0:
+            pattern = "harmful"
+        elif l90 > l30 > l7:
+            pattern = "amplifying"
+        elif abs(l90 - l7) < 2.0:
+            pattern = "sustaining"
+        elif l7 > l30 > l90:
+            pattern = "decaying"
+        else:
+            pattern = "mixed"
+
+        return {
+            "metric": metric,
+            "pattern": pattern,
+            "lift_7d": l7,
+            "lift_30d": l30,
+            "lift_90d": l90,
+            "decay_rate_7d_to_90d": round((l90 - l7) / max(abs(l7), 0.01) * 100, 1),
+        }
+
     def generate_report(self) -> str:
         """Generate comprehensive LTV effects report."""
         lines = ["# Long-Term Value Effects Analysis\n"]
@@ -176,5 +259,21 @@ class LTVEffectsAnalyzer:
         retention = self.engagement_retention_curve()
         lines.append("\n## 4. Engagement Retention\n")
         lines.append(retention.to_markdown(index=False))
+
+        # Spend trajectory
+        spend_traj = self.spend_trajectory()
+        if not spend_traj.empty:
+            lines.append("\n## 5. Spend Trajectory (Treatment vs Holdout)\n")
+            lines.append(spend_traj.to_markdown(index=False))
+            spend_decay = self.outcome_decay_assessment("spend")
+            lines.append(f"\n**Spend pattern: {spend_decay['pattern'].upper()}**")
+
+        # On-time rate trajectory
+        otp_traj = self.on_time_rate_trajectory()
+        if not otp_traj.empty:
+            lines.append("\n## 6. On-Time Payment Rate Trajectory\n")
+            lines.append(otp_traj.to_markdown(index=False))
+            otp_decay = self.outcome_decay_assessment("on_time_rate")
+            lines.append(f"\n**On-time rate pattern: {otp_decay['pattern'].upper()}**")
 
         return "\n".join(lines)

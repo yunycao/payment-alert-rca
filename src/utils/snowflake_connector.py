@@ -152,6 +152,77 @@ class SnowflakeQueryRunner:
 
         return results
 
+    def execute_rca_queries(
+        self, output_dir: str = "data/staging/"
+    ) -> dict[str, pd.DataFrame]:
+        """Execute root cause analysis queries for spend and on-time rate decomposition."""
+        from datetime import datetime, timedelta
+
+        end_date = datetime.strptime(self.analysis_params["end_date"], "%Y-%m-%d")
+        current_start = (end_date - timedelta(days=7)).strftime("%Y-%m-%d")
+        baseline_end = (end_date - timedelta(days=8)).strftime("%Y-%m-%d")
+        baseline_start = (end_date - timedelta(days=15)).strftime("%Y-%m-%d")
+
+        rca_params = {
+            "current_start": current_start,
+            "current_end": self.analysis_params["end_date"],
+            "baseline_start": baseline_start,
+            "baseline_end": baseline_end,
+        }
+
+        results = {}
+
+        results["spend_decomposition"] = self.execute_query(
+            "sql/rca/spend_decomposition.sql",
+            extra_params=rca_params,
+            output_path=f"{output_dir}/rca_decomposition.parquet",
+        )
+
+        results["ontime_decomposition"] = self.execute_query(
+            "sql/rca/ontime_rate_decomposition.sql",
+            extra_params=rca_params,
+            output_path=f"{output_dir}/rca_ontime_decomposition.parquet",
+        )
+
+        return results
+
+    def execute_ecosystem_queries(
+        self, output_dir: str = "data/staging/"
+    ) -> dict[str, pd.DataFrame]:
+        """Execute all ecosystem analysis queries (incrementality, cannibalization, LTV, portfolio)."""
+        eco_config = self.config.get("ecosystem", {})
+        results = {}
+
+        results["incrementality"] = self.execute_query(
+            "sql/ecosystem/incrementality.sql",
+            extra_params={
+                "attribution_window_hours": eco_config.get("cannibalization", {}).get("attribution_window_hours", 72),
+                "max_outcome_window_days": 90,
+                "pre_period_days": 30,
+            },
+            output_path=f"{output_dir}/incrementality.parquet",
+        )
+
+        results["cannibalization"] = self.execute_query(
+            "sql/ecosystem/cannibalization.sql",
+            output_path=f"{output_dir}/cannibalization.parquet",
+        )
+
+        results["ltv_effects"] = self.execute_query(
+            "sql/ecosystem/ltv_effects.sql",
+            extra_params={
+                "fatigue_penalty_weight": self.config.get("tradeoffs", {}).get("frequency", {}).get("fatigue_penalty_weight", 0.3),
+            },
+            output_path=f"{output_dir}/ltv_effects.parquet",
+        )
+
+        results["portfolio_efficiency"] = self.execute_query(
+            "sql/ecosystem/portfolio_efficiency.sql",
+            output_path=f"{output_dir}/portfolio_efficiency.parquet",
+        )
+
+        return results
+
     def test_connection(self) -> bool:
         """Test Snowflake connectivity."""
         try:

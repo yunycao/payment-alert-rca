@@ -35,6 +35,30 @@
           "command": "python src/hooks/pull_competitor_data.py --check-cache"
         }
       ]
+    },
+    {
+      "matcher": {
+        "tool_name": "Bash",
+        "command_pattern": ".*rca.*(spend|payment|on.?time|drop|decline).*"
+      },
+      "hooks": [
+        {
+          "type": "preToolUse",
+          "command": "python src/hooks/pull_rca_data.py"
+        }
+      ]
+    },
+    {
+      "matcher": {
+        "tool_name": "Bash",
+        "command_pattern": ".*root.?cause.*"
+      },
+      "hooks": [
+        {
+          "type": "preToolUse",
+          "command": "python src/hooks/pull_rca_data.py"
+        }
+      ]
     }
   ]
 }

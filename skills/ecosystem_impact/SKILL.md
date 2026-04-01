@@ -119,3 +119,28 @@ optimal = freq.fit_response_curve(fatigue_penalty_weight=0.3)
 **Warning signs**: Decaying LTV, high cannibalization (>30%), rising fatigue, concentrated portfolio, frequency above optimal.
 
 **Action triggers**: Negative 90d LTV lift, cannibalization > 40%, unsubscribe excess > 0.2pp, HHI > 0.25.
+
+## Integration with Business Outcome RCA
+
+When a spend drop or on-time rate decline is detected, the ecosystem analysis provides causal verification:
+
+```python
+# Check if spend/on-time lift is still positive (messaging still working)
+spend_lift = inc.estimate_lift("avg_spend")
+otp_lift = inc.estimate_lift("on_time_payment_rate")
+
+# Track spend and on-time rate trajectories over time
+from src.ecosystem import LTVEffectsAnalyzer
+ltv = LTVEffectsAnalyzer()
+spend_traj = ltv.spend_trajectory()          # 7d / 30d / 90d windows
+otp_traj = ltv.on_time_rate_trajectory()     # 7d / 30d / 90d windows
+spend_decay = ltv.outcome_decay_assessment("spend")
+otp_decay = ltv.outcome_decay_assessment("on_time_rate")
+```
+
+**Critical question**: Is the drop messaging-driven or external?
+- If holdout group also shows the drop → external factor (not messaging)
+- If only treatment group drops → messaging is causing harm
+- If causal lift is shrinking → messaging effectiveness degrading
+
+See `skills/spend_drop_rca/` and `skills/ontime_rate_rca/` for full diagnostic workflows.

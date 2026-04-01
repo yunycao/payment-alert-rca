@@ -51,7 +51,18 @@ user_outcomes AS (
 
         -- Fatigue / negative signals
         MAX(CASE WHEN u.event_type = 'unsubscribe' THEN 1 ELSE 0 END) AS unsubscribed,
-        MAX(CASE WHEN u.event_type = 'opt_out' THEN 1 ELSE 0 END) AS opted_out
+        MAX(CASE WHEN u.event_type = 'opt_out' THEN 1 ELSE 0 END) AS opted_out,
+
+        -- Business outcome: spend (total payment amount within window)
+        SUM(CASE WHEN u.event_type = 'payment_completed'
+                  AND DATEDIFF(hour, ha.assignment_date, u.outcome_date) <= {{ attribution_window_hours }}
+            THEN u.payment_amount ELSE 0 END) AS spend,
+
+        -- Business outcome: on-time payment (among users with a payment due)
+        MAX(CASE WHEN u.event_type = 'payment_completed'
+                  AND u.payment_completed_date <= u.payment_due_date
+            THEN 1 ELSE 0 END) AS paid_on_time,
+        MAX(CASE WHEN u.payment_due_date IS NOT NULL THEN 1 ELSE 0 END) AS has_payment_due
 
     FROM {{ database }}.{{ schema }}.user_events u
     INNER JOIN holdout_assignment ha ON u.user_id = ha.user_id
@@ -105,6 +116,12 @@ SELECT
     -- Negative externalities
     AVG(COALESCE(uo.unsubscribed, 0)) AS unsubscribe_rate,
     AVG(COALESCE(uo.opted_out, 0)) AS opt_out_rate,
+
+    -- Business outcomes: spend and on-time rate
+    AVG(COALESCE(uo.spend, 0)) AS avg_spend,
+    SUM(COALESCE(uo.spend, 0)) AS total_spend,
+    AVG(CASE WHEN uo.has_payment_due = 1 THEN uo.paid_on_time END) AS on_time_payment_rate,
+    SUM(COALESCE(uo.has_payment_due, 0)) AS users_with_payment_due,
 
     -- Pre-period covariates (for DiD and balance checks)
     AVG(ppa.pre_payments) AS avg_pre_payments,

@@ -52,11 +52,25 @@ class FunnelAnalyzer:
 
         return summary
 
+    # Business outcome columns (spend + on-time payment rate)
+    OUTCOME_COLUMNS = [
+        "total_spend", "avg_spend_per_user", "users_with_payment_due",
+        "on_time_payment_rate", "on_time_users", "late_users", "missed_users",
+        "avg_days_relative_to_due",
+    ]
+
     def daily_metrics(self) -> pd.DataFrame:
         """Compute daily funnel metrics with derived rates."""
-        daily = self.df.groupby(["report_date", "channel"]).agg({
-            col: "sum" for col in self.STAGE_COLUMNS.values()
-        }).reset_index()
+        agg_cols = {col: "sum" for col in self.STAGE_COLUMNS.values()}
+        # Add business outcome aggregations if present
+        if "total_spend" in self.df.columns:
+            agg_cols["total_spend"] = "sum"
+            agg_cols["users_with_payment_due"] = "sum"
+            agg_cols["on_time_users"] = "sum"
+            agg_cols["late_users"] = "sum"
+            agg_cols["missed_users"] = "sum"
+
+        daily = self.df.groupby(["report_date", "channel"]).agg(agg_cols).reset_index()
 
         # Derived rates
         daily["targeting_rate"] = (daily["targeted_users"] / daily["eligible_users"] * 100).round(2)
@@ -66,7 +80,74 @@ class FunnelAnalyzer:
         daily["conversion_rate"] = (daily["converted_users"] / daily["delivered_users"] * 100).round(2)
         daily["suppression_rate"] = (daily["suppressed_users"] / daily["eligible_users"] * 100).round(2)
 
+        # Business outcome rates
+        if "users_with_payment_due" in daily.columns:
+            daily["on_time_payment_rate"] = (
+                daily["on_time_users"] / daily["users_with_payment_due"] * 100
+            ).round(2)
+            daily["avg_spend_per_user"] = (
+                daily["total_spend"] / daily["eligible_users"]
+            ).round(2)
+            daily["missed_payment_rate"] = (
+                daily["missed_users"] / daily["users_with_payment_due"] * 100
+            ).round(2)
+
         return daily
+
+    def business_outcome_summary(self) -> pd.DataFrame:
+        """Summarize spend and on-time payment rate by channel × segment."""
+        if "total_spend" not in self.df.columns:
+            return pd.DataFrame({"error": ["Business outcome columns not present in data"]})
+
+        return self.df.groupby(["channel", "segment"]).agg({
+            "eligible_users": "sum",
+            "total_spend": "sum",
+            "users_with_payment_due": "sum",
+            "on_time_users": "sum",
+            "late_users": "sum",
+            "missed_users": "sum",
+        }).assign(
+            avg_spend_per_user=lambda x: (x["total_spend"] / x["eligible_users"]).round(2),
+            on_time_rate=lambda x: (x["on_time_users"] / x["users_with_payment_due"] * 100).round(2),
+            missed_rate=lambda x: (x["missed_users"] / x["users_with_payment_due"] * 100).round(2),
+        ).reset_index()
+
+    def detect_outcome_drops(
+        self, metric: str = "on_time_payment_rate", window: int = 7, threshold_pct: float = 5.0
+    ) -> pd.DataFrame:
+        """Detect week-over-week drops in business outcome metrics.
+
+        Compares the most recent `window` days to the prior `window` days.
+        Returns channels/segments where the drop exceeds threshold_pct.
+        """
+        daily = self.daily_metrics()
+        if metric not in daily.columns:
+            return pd.DataFrame()
+
+        daily = daily.sort_values("report_date")
+        cutoff = daily["report_date"].max() - pd.Timedelta(days=window)
+        prior_cutoff = cutoff - pd.Timedelta(days=window)
+
+        current = daily[daily["report_date"] > cutoff]
+        baseline = daily[(daily["report_date"] > prior_cutoff) & (daily["report_date"] <= cutoff)]
+
+        results = []
+        for channel in daily["channel"].unique():
+            c = current[current["channel"] == channel][metric].mean()
+            b = baseline[baseline["channel"] == channel][metric].mean()
+            if b > 0:
+                change_pct = (c - b) / b * 100
+                if change_pct < -threshold_pct:
+                    results.append({
+                        "channel": channel,
+                        "metric": metric,
+                        "baseline_value": round(b, 4),
+                        "current_value": round(c, 4),
+                        "change_pct": round(change_pct, 2),
+                        "severity": "critical" if change_pct < -2 * threshold_pct else "warning",
+                    })
+
+        return pd.DataFrame(results)
 
     def suppression_analysis(self) -> pd.DataFrame:
         """Break down suppression reasons by channel and segment."""
@@ -127,6 +208,19 @@ class FunnelAnalyzer:
             lines.append(f"\n## {channel.replace('_', ' ').title()} Channel\n")
             lines.append(summary.to_markdown(index=False))
             lines.append("")
+
+        # Business outcomes
+        if "total_spend" in self.df.columns:
+            lines.append("\n## Business Outcomes: Spend & On-Time Payment Rate\n")
+            outcomes = self.business_outcome_summary()
+            lines.append(outcomes.to_markdown(index=False))
+
+            # Detect drops
+            for metric in ["on_time_payment_rate", "avg_spend_per_user"]:
+                drops = self.detect_outcome_drops(metric=metric)
+                if len(drops) > 0:
+                    lines.append(f"\n### ⚠️ Drop Detected: {metric}\n")
+                    lines.append(drops.to_markdown(index=False))
 
         anomalies = self.find_anomalous_days()
         if len(anomalies) > 0:
