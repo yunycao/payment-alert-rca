@@ -16,9 +16,11 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 from pathlib import Path
+from datetime import datetime
 
 from .decomposer import MetricDecomposer
 from .validator import RCAValidator
+from .react_engine import ReActEngine
 
 
 class RCAOrchestrator:
@@ -438,6 +440,99 @@ class RCAOrchestrator:
                 f"Investigation scored {scorecard['combined_score']}/100 "
                 f"(grade: {scorecard['combined_grade']}). "
                 f"Missing phases: {missing}. Consider re-running."
+            )
+
+        rca_result["validation"] = scorecard
+        return rca_result
+
+    # ------------------------------------------------------------------ #
+    # ReAct Mode: dynamic reasoning loop
+    # ------------------------------------------------------------------ #
+    def run_react_rca(
+        self,
+        metric: str = "avg_spend",
+        max_steps: int = 20,
+        verbose: bool = True,
+    ) -> dict:
+        """Execute RCA using the ReAct reasoning framework.
+
+        Instead of the fixed 5-step pipeline (run_full_rca), this mode uses
+        a Thought-Action-Observation loop that adapts the investigation
+        based on evidence gathered at each step.
+
+        The ReAct engine:
+        - Reasons about what to investigate next (Thought)
+        - Calls a specific diagnostic action (Action)
+        - Interprets the result and updates evidence (Observation)
+        - Repeats until sufficient evidence is gathered
+
+        Reference: Yao et al. "ReAct: Synergizing Reasoning and Acting
+        in Language Models." ICLR 2023.
+
+        Args:
+            metric: Business metric to investigate ("avg_spend" or "on_time_rate")
+            max_steps: Maximum T-A-O iterations
+            verbose: Print reasoning trace during execution
+
+        Returns:
+            dict compatible with run_full_rca output, plus:
+                - trace: ReActTrace with full reasoning chain
+                - n_steps: total steps taken
+                - phases_covered: set of completed phases
+                - conclusion: synthesized finding
+                - mode: "react"
+        """
+        engine = ReActEngine(
+            orchestrator=self,
+            max_steps=max_steps,
+            verbose=verbose,
+        )
+        return engine.run(metric)
+
+    def run_validated_react_rca(
+        self,
+        metric: str = "avg_spend",
+        max_steps: int = 20,
+        verbose: bool = True,
+    ) -> dict:
+        """Execute ReAct RCA with validation scoring.
+
+        Combines the adaptive ReAct loop with the completeness/conciseness
+        validation layer.
+        """
+        rca_result = self.run_react_rca(metric, max_steps, verbose)
+
+        # Build execution log from ReAct trace
+        trace = rca_result.get("trace")
+        execution_log = {
+            "data_validation_count": 1,  # validated once at data load
+            "anomaly_check_details": {"checks": []},
+            "start_time": trace.start_time if trace else datetime.now().isoformat(),
+            "mode": "react",
+            "n_steps": rca_result.get("n_steps", 0),
+        }
+
+        # Extract anomaly check details from trace
+        if trace:
+            for step in trace.steps:
+                if step.action_name == "check_anomalies" and step.result:
+                    if isinstance(step.result, list):
+                        for a in step.result:
+                            execution_log["anomaly_check_details"]["checks"].append({
+                                "type": a.get("anomaly", "unknown"),
+                                "loaded": True,
+                                "rows": 1,
+                            })
+
+        # Validate
+        scorecard = self.validator.validate(rca_result, execution_log)
+
+        if scorecard["action"] == "re-run":
+            missing = scorecard["completeness"]["missing_phases"]
+            rca_result["_validation_warning"] = (
+                f"Investigation scored {scorecard['combined_score']}/100 "
+                f"(grade: {scorecard['combined_grade']}). "
+                f"Missing phases: {missing}. Consider re-running with fixed pipeline."
             )
 
         rca_result["validation"] = scorecard

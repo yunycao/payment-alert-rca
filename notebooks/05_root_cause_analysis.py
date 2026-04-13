@@ -346,3 +346,83 @@ Path("../output/reports/rca_operational_metrics.md").write_text(validation_repor
 print("📄 Operational metrics dashboard saved")
 
 print("\n✅ All RCA reports saved to output/reports/")
+
+# %% [markdown]
+# ---
+# ## Part 8: ReAct Mode — Adaptive Reasoning Loop
+#
+# Instead of the fixed 5-step pipeline above, the ReAct engine uses a
+# Thought-Action-Observation loop that adapts the investigation based on
+# evidence gathered at each step. Based on Yao et al. (ICLR 2023).
+
+# %% Run ReAct investigation
+from src.rca import ReActEngine
+
+react_result = rca.run_react_rca(metric="avg_spend", max_steps=20, verbose=True)
+
+# %% Inspect the reasoning trace
+trace = react_result["trace"]
+print("\n" + "=" * 60)
+print("REACT REASONING TRACE")
+print("=" * 60)
+print(trace.summary())
+
+# %% Compare ReAct vs Fixed Pipeline
+print("\n" + "=" * 60)
+print("REACT vs FIXED PIPELINE COMPARISON")
+print("=" * 60)
+print(f"  ReAct steps taken:  {react_result['n_steps']}")
+print(f"  Fixed pipeline:     5 (always)")
+print(f"  Phases covered:     {react_result['phases_covered']}")
+print(f"  Mode:               {react_result['mode']}")
+print(f"\n  Conclusion:")
+print(f"    {react_result['conclusion']}")
+
+# %% Validated ReAct RCA
+validated_react = rca.run_validated_react_rca(metric="avg_spend", verbose=False)
+react_scorecard = validated_react["validation"]
+
+print("\n" + "=" * 60)
+print("VALIDATION SCORECARD — REACT RCA")
+print("=" * 60)
+print(f"  Combined Score: {react_scorecard['combined_score']}/100 (Grade: {react_scorecard['combined_grade']})")
+print(f"  Action: {react_scorecard['action'].upper()}")
+print(f"  Completeness: {react_scorecard['completeness']['total_score']}/100")
+print(f"  Conciseness: {react_scorecard['conciseness']['score']}/100")
+
+# %% Save ReAct trace report
+react_report_lines = [
+    "# ReAct RCA Investigation Report\n",
+    f"**Metric**: {react_result['detection'].get('metric', 'avg_spend')}",
+    f"**Mode**: ReAct (adaptive reasoning loop)",
+    f"**Steps**: {react_result['n_steps']}",
+    f"**Phases Covered**: {', '.join(react_result['phases_covered'])}",
+    "",
+    "## Reasoning Trace\n",
+    trace.summary(),
+    "",
+    "## Conclusion\n",
+    react_result["conclusion"],
+    "",
+]
+
+if "validation" in validated_react:
+    sc = validated_react["validation"]
+    react_report_lines.extend([
+        "## Validation\n",
+        f"- **Score**: {sc['combined_score']}/100 ({sc['combined_grade']})",
+        f"- **Action**: {sc['action']}",
+        f"- **Completeness**: {sc['completeness']['total_score']}/100",
+        f"- **Conciseness**: {sc['conciseness']['score']}/100",
+    ])
+
+Path("../output/reports/react_rca_trace.md").write_text("\n".join(react_report_lines))
+print("\n📄 ReAct trace report saved")
+
+# %% Run ReAct on on-time rate as well
+react_otp = rca.run_react_rca(metric="on_time_rate", max_steps=20, verbose=True)
+print(f"\nOn-Time Rate ReAct Conclusion:")
+print(f"  {react_otp['conclusion']}")
+print(f"  Steps: {react_otp['n_steps']} | Phases: {react_otp['phases_covered']}")
+
+print("\n✅ ReAct investigations complete")

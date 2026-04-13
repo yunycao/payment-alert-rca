@@ -3,5 +3,13 @@
 from .decomposer import MetricDecomposer
 from .orchestrator import RCAOrchestrator
 from .validator import RCAValidator
+from .react_engine import ReActEngine, ReActTrace, ActionRegistry
 
-__all__ = ["MetricDecomposer", "RCAOrchestrator", "RCAValidator"]
+__all__ = [
+    "MetricDecomposer",
+    "RCAOrchestrator",
+    "RCAValidator",
+    "ReActEngine",
+    "ReActTrace",
+    "ActionRegistry",
+]
